@@ -1,0 +1,8 @@
+/local/
+/_site/
+/build/
+/dist/
+/*.egg-info/
+__pycache__/
+.ruff_cache/
+*.py[cod]

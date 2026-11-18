@@ -1,0 +1,8 @@
+# SessionLaunch
+
+Documentation for the Python and PySide6 terminal and agent session organizer.
+
+- [Overview](index.md)
+- [Getting started](getting-started.md)
+- [Session model](model.md)
+- [Source](https://github.com/toppk/sessionlaunch)

@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sessionlaunch"
+version = "0.1.0"
+description = "Terminal inventory and agent session organization"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = ["PySide6>=6", "python-xlib>=0.33"]
+
+[project.scripts]
+sessionlaunch = "session_launch.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["session_launch*"]
+
+[tool.setuptools.package-data]
+session_launch = ["sessionlaunch.service.in"]

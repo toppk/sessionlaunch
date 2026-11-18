@@ -1,0 +1,159 @@
+"""Save an observed command and reopen it in a chosen terminal emulator."""
+
+import os
+import pwd
+import re
+import shlex
+import shutil
+import tomllib
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+
+from . import inventory
+from . import launch_backend
+from .sessionlaunch_paths import CONFIG_DIR, private_write_text, secure_config_dir
+
+
+TERMINALS = ("wezterm", "foot", "ghostty", "xterm", "revenant")
+AGENT_WORD = re.compile(r"(?<![\w-])(codex|claude)(?![\w-])", re.I)
+SHELL_NAMES = {"bash", "zsh", "fish", "sh", "dash", "ksh", "mksh", "tcsh", "csh", "nu", "elvish"}
+
+
+def default_shell():
+    """Use the user's chosen shell when no shell is attached to the PTY."""
+    choices = [os.environ.get("SHELL", ""), pwd.getpwuid(os.getuid()).pw_shell, "bash"]
+    for choice in choices:
+        executable = choice if Path(choice).is_absolute() else shutil.which(choice)
+        if executable and Path(executable).is_file() and os.access(executable, os.X_OK):
+            return str(executable)
+    raise FileNotFoundError("No usable interactive shell is available")
+
+
+def observed_shell(terminal):
+    """Find the nearest attached shell in the foreground process's parent chain."""
+    processes = terminal.get("processes", terminal.get("process", []))
+    by_pid = {process["pid"]: process for process in processes}
+    pid = terminal.get("pid", 0)
+    seen = set()
+    while pid in by_pid and pid not in seen:
+        seen.add(pid)
+        process = by_pid[pid]
+        name = process.get("comm", "").removeprefix("-").casefold()
+        if name in SHELL_NAMES:
+            argv = process.get("argv", [])
+            first = argv[0].removeprefix("-") if argv else ""
+            candidate = first if Path(first).is_absolute() else shutil.which(name)
+            if candidate and Path(candidate).is_file() and os.access(candidate, os.X_OK):
+                return str(candidate), "observed"
+        pid = process.get("ppid", 0)
+    return default_shell(), "default"
+
+
+def read_settings(path):
+    if not path.exists():
+        return {"default_terminal": "xterm", "launch_backend": "systemd-user"}
+    with path.open("rb") as stream:
+        settings = tomllib.load(stream)
+    name = settings.get("default_terminal", "xterm")
+    if name not in TERMINALS:
+        raise ValueError(f"Unsupported default_terminal: {name}")
+    backend = settings.get("launch_backend", "systemd-user")
+    if backend not in launch_backend.BACKENDS:
+        raise ValueError(f"Unsupported launch_backend: {backend}")
+    return {"default_terminal": name, "launch_backend": backend}
+
+
+def write_settings(path, name):
+    if name not in TERMINALS:
+        raise ValueError(f"Unsupported terminal: {name}")
+    if path.parent == CONFIG_DIR:
+        secure_config_dir()
+    backend = read_settings(path)["launch_backend"]
+    private_write_text(path, f'default_terminal = "{name}"\nlaunch_backend = "{backend}"\n')
+
+
+def freeze_terminal(terminal, path=inventory.SESSIONS_FILE):
+    """Capture the foreground argv, without guessing missing command arguments."""
+    if terminal.get("state") != "live":
+        raise ValueError("Only an active terminal can be frozen")
+    argv = terminal.get("argv", [])
+    if not argv or not all(isinstance(arg, str) for arg in argv):
+        raise ValueError("The foreground command line is unavailable")
+    directory = terminal.get("cwd") or terminal.get("pwd_env")
+    if not directory or not Path(directory).is_dir():
+        raise ValueError("The foreground working directory is unavailable")
+    policy = "preview" if terminal.get("agent") or AGENT_WORD.search(shlex.join(argv)) else "run"
+    shell, shell_source = observed_shell(terminal)
+    saved = {
+        "id": str(uuid.uuid4()),
+        "title": terminal.get("comm") or Path(argv[0]).name,
+        "directory": directory,
+        "command_argv": list(argv),
+        "captured_at": datetime.now(timezone.utc).isoformat(),
+        "source_terminal_key": terminal["key"],
+        "state": "saved",
+        "replay_policy": policy,
+        "shell": shell,
+        "shell_source": shell_source,
+    }
+    data = inventory.read_previous(path)
+    data.setdefault("session", [])
+    data.setdefault("terminal", [])
+    data.setdefault("saved", []).append(saved)
+    inventory.write_inventory(data, path)
+    return saved
+
+
+def terminal_argv(name, title, directory, rcfile):
+    """Build CLI arguments using the locally supported emulator command forms."""
+    shell = ["bash", "--rcfile", str(rcfile), "-i"]
+    if name == "xterm":
+        return ["xterm", "-title", title, "-e", *shell]
+    if name == "revenant":
+        return ["revenant", "-title", title, "-e", *shell]
+    if name == "foot":
+        return ["foot", "-T", title, *shell]
+    if name == "ghostty":
+        return ["ghostty", "--title=" + title, "-e", *shell]
+    if name == "wezterm":
+        return ["wezterm", "start", "--always-new-process", "--cwd", str(directory),
+                "--", *shell]
+    raise ValueError(f"Unsupported terminal: {name}")
+
+
+def launch(name, directory, title, command, rcfile, frozen_id="", shell="",
+           backend="systemd-user"):
+    if name not in TERMINALS:
+        raise ValueError(f"Unsupported terminal: {name}")
+    executable = shutil.which(name)
+    if not executable:
+        raise FileNotFoundError(f"Terminal emulator is not installed: {name}")
+    if not Path(directory).is_dir():
+        raise FileNotFoundError(f"Directory no longer exists: {directory}")
+    env = os.environ.copy()
+    env.pop("SESSIONLAUNCH_FROZEN_ID", None)
+    env.pop("SESSIONLAUNCH_RETURN_SHELL", None)
+    env.pop("SESSIONLAUNCH_UNIT", None)
+    # This xterm build drops XTERM_STARTUP_COMMAND before Bash starts; use our own name.
+    env["SESSIONLAUNCH_STARTUP_COMMAND"] = command
+    env["SESSIONLAUNCH_WINDOW_TITLE"] = title
+    chosen_shell = shell or default_shell()
+    if not Path(chosen_shell).is_file() or not os.access(chosen_shell, os.X_OK):
+        raise FileNotFoundError(f"Saved shell is unavailable: {chosen_shell}")
+    # The bootstrap Bash must be replaced even when the saved shell is Bash itself.
+    env["SESSIONLAUNCH_RETURN_SHELL"] = chosen_shell
+    if frozen_id:
+        env["SESSIONLAUNCH_FROZEN_ID"] = frozen_id
+    argv = terminal_argv(name, title, directory, rcfile)
+    argv[0] = executable
+    return launch_backend.launch(backend, argv, str(directory), env)
+
+
+def frozen_command(saved):
+    if saved.get("replay_policy") != "run":
+        raise ValueError("This saved command is preview-only because it may launch an agent")
+    argv = saved.get("command_argv", [])
+    if not argv or AGENT_WORD.search(shlex.join(argv)):
+        raise ValueError("Agent commands cannot be replayed by this prototype")
+    return shlex.join(argv)
