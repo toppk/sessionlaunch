@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (QAbstractItemView, QApplication, QDialog, QMessag
                                QStyleOptionViewItem, QVBoxLayout, QWidget)
 
 import manual_links
+from session_launch.session_groups import SessionGroups
 from sessionlaunch import (AnnotationDialog, LinkSessionDialog, card_presence, display_status,
                            elevation_reason, format_last_active,
                            record_facets, tag_label, terminal_directory, ResizeSurface,
@@ -28,6 +29,34 @@ from sessionlaunch import (AnnotationDialog, LinkSessionDialog, card_presence, d
 
 
 class SessionLaunchTest(unittest.TestCase):
+    def test_gui_reloads_external_groups_when_service_snapshot_is_unchanged(self):
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        QApplication.instance() or QApplication([])
+        data = {"session": [], "terminal": [], "saved": [], "scan_status": "ok"}
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.dict(os.environ, {"SESSIONLAUNCH_DISABLE_SERVICE": ""}), \
+             patch("sessionlaunch.SERVICE_SOCKET", Path(directory) / "service.socket"), \
+             patch("sessionlaunch.GROUPS_FILE", Path(directory) / "groups.json"), \
+             patch("sessionlaunch.APPEARANCE_FILE", Path(directory) / "appearance.json"), \
+             patch("sessionlaunch.sessionlaunch_service_client.request", side_effect=[
+                 {"revision": 7, "data": data}, {"unchanged": True}]), \
+             patch("sessionlaunch.HotlistServer.start"), \
+             patch.object(SessionLaunch, "refresh_agents"):
+            Path(directory, "service.socket").touch()
+            window = SessionLaunch([])
+            try:
+                external = SessionGroups(Path(directory) / "groups.json")
+                domain = external.create_domain("work")
+                group = external.create("saved-sessions")
+                external.set_group_domain(group, domain)
+                window.refresh_inventory()
+                self.assertEqual(window.groups.get(group)["name"], "saved-sessions")
+                self.assertTrue(any(window.navigation.ref_for(item) == ("group", group)
+                                    for item in window.navigation.findItems(
+                                        "*", Qt.MatchWildcard | Qt.MatchRecursive)))
+            finally:
+                window.close()
+
     def test_gui_reads_inventory_from_service_when_available(self):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         QApplication.instance() or QApplication([])
