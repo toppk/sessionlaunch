@@ -3,7 +3,7 @@ site-title: SessionLaunch
 site-tagline: terminal and agent session organizer
 site-logo: assets/logo-128.webp
 site-favicon: assets/favicon.ico
-site-footer: 'Code and docs: MIT · Logo reserved · <a href="https://github.com/toppk/sessionlaunch/blob/main/ASSETS.md">Asset rights</a>'
+site-footer: 'Code and docs: MIT · Logo reserved · <a href="https://github.com/toppk/sessionlaunch/blob/master/ASSETS.md">Asset rights</a>'
 llms: llms.txt
 top-links:
   - label: Get started

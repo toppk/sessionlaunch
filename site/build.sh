@@ -7,7 +7,7 @@ repo_root=$(dirname "$site_dir")
 out="$repo_root/_site"
 theme="$site_dir/theme"
 canonical=https://toppk.github.io/sessionlaunch
-edit=https://github.com/toppk/sessionlaunch/edit/main
+edit=https://github.com/toppk/sessionlaunch/edit/master
 
 # page|title|navigation section|source, in reading order.
 pages=(
