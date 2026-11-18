@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from session_launch import __version__
+from session_launch.service_protocol import PROTOCOL_VERSION
 from sessionlaunch_service import InventoryState, ServiceServer, dispatch
 from sessionlaunch_service_client import request
 
@@ -27,8 +28,15 @@ class ServiceTest(unittest.TestCase):
                 status = request("status", path=path)
                 self.assertEqual(status["revision"], 3)
                 self.assertEqual(status["version"], __version__)
+                self.assertEqual(status["service_version"], __version__)
+                self.assertEqual(status["protocol_version"], PROTOCOL_VERSION)
                 self.assertEqual(request("snapshot", path=path)["data"], state.data)
                 self.assertTrue(request("snapshot", path=path, since=3)["unchanged"])
+                request("snapshot", path=path, client="gui")
+                self.assertEqual(sum(row[0] == "cli" for row in server.seen_clients), 1)
+                self.assertTrue(any(row[0] == "gui" and row[2:] ==
+                                    (__version__, PROTOCOL_VERSION)
+                                    for row in server.seen_clients))
                 with patch("sessionlaunch_service.subprocess.run") as run:
                     self.assertEqual(request("raise", path=path,
                                              terminal_key="pty:42")["window_id"], "0x123")

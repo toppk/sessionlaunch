@@ -23,7 +23,8 @@ def main(argv=None):
     try:
         if args.command == "status":
             answer = request("status", path=args.socket)
-            print(f"service version={answer.get('version', 'unknown')} pid={answer['pid']} "
+            print(f"service version={answer.get('version', 'unknown')} "
+                  f"protocol={answer.get('protocol_version', 'unknown')} pid={answer['pid']} "
                   f"revision={answer['revision']} "
                   f"{'scanning' if answer['warming'] else 'ready'}")
             if answer["error"]:

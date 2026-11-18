@@ -91,6 +91,11 @@ may be missed. Closed terminal history expires after 90 days. Inventory
 records include command arguments and working directories, so treat the
 configuration directory as private data.
 
+Each service request carries the client's application and protocol versions;
+the reply carries the service versions. The GUI and service log the pair when
+they connect. Protocol version 1 is informational for now: a mismatch is
+visible in logs but does not block a request.
+
 The default launch backend uses transient `systemd --user` units, leaving
 terminals independent of the GUI. `launch_backend = "direct"` in
 `settings.toml` selects the older direct process path. A preferred terminal

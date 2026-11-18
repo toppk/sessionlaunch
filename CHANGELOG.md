@@ -4,7 +4,12 @@ SessionLaunch uses `MAJOR.MINOR.PATCH` version numbers. During the 0.x series,
 minor versions add features or change behavior; patch versions fix defects
 without intentionally changing the session data format.
 
-## 0.2.1 — Unreleased
+## 0.2.2 — Unreleased
+
+- Exchange GUI/client, service, and protocol versions on service requests and log
+  each new GUI connection.
+
+## 0.2.1 — 2026-11-18
 
 - Reload external group changes in the GUI while it is open.
 

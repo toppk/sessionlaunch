@@ -1576,6 +1576,7 @@ class SessionLaunch(QMainWindow):
         self.live_data = {"session": [], "terminal": [], "saved": []}
         self.service_revision = None
         self.service_available = False
+        self.service_peer = None
         self.view = "sessions"
         self.agent_rows = []
         self.agent_by_id = {}
@@ -5151,8 +5152,15 @@ class SessionLaunch(QMainWindow):
             self.reload_external_groups()
             if SERVICE_SOCKET.exists() and not os.environ.get("SESSIONLAUNCH_DISABLE_SERVICE"):
                 response = sessionlaunch_service_client.request(
-                    "snapshot", since=self.service_revision)
+                    "snapshot", since=self.service_revision, client="gui")
                 self.service_available = True
+                peer = (response.get("service_pid"), response.get("service_version"),
+                        response.get("protocol_version"))
+                if peer != self.service_peer:
+                    self.service_peer = peer
+                    console_log("INFO", f"service connected gui={__version__} "
+                                f"service={peer[1] or 'unknown'} "
+                                f"protocol={peer[2] or 'unknown'} pid={peer[0] or 'unknown'}")
                 if response.get("warming"):
                     self.status.setText("SessionLaunch service is scanning terminals…")
                     return
@@ -5221,7 +5229,8 @@ class SessionLaunch(QMainWindow):
         try:
             if self.service_available:
                 saved = sessionlaunch_service_client.request(
-                    "freeze", terminal_key=terminal["key"], timeout=5)["saved"]
+                    "freeze", terminal_key=terminal["key"], timeout=5,
+                    client="gui")["saved"]
                 self.service_revision = None
             else:
                 saved = restore.freeze_terminal(terminal)

@@ -1,16 +1,21 @@
 """Small synchronous client for the SessionLaunch user service."""
 
 import json
+import os
 import socket
 
+from . import __version__
 from .sessionlaunch_paths import SERVICE_SOCKET
+from .service_protocol import PROTOCOL_VERSION
 
 
 MAX_REPLY_BYTES = 64 * 1024 * 1024
 
 
-def request(action, *, path=SERVICE_SOCKET, timeout=1.5, **fields):
-    payload = (json.dumps({"action": action, **fields}) + "\n").encode()
+def request(action, *, path=SERVICE_SOCKET, timeout=1.5, client="cli", **fields):
+    payload = (json.dumps({"action": action, **fields, "client": client,
+                           "client_pid": os.getpid(), "client_version": __version__,
+                           "protocol_version": PROTOCOL_VERSION}) + "\n").encode()
     if len(payload) > 65536:
         raise ValueError("Request is too large")
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:

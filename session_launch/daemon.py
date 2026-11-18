@@ -16,6 +16,7 @@ from pathlib import Path
 from . import __version__, inventory
 from . import restore
 from .sessionlaunch_paths import SERVICE_SOCKET, SESSIONS_FILE, secure_config_dir
+from .service_protocol import PROTOCOL_VERSION
 
 
 def log(message):
@@ -153,9 +154,13 @@ class RequestHandler(socketserver.StreamRequestHandler):
         try:
             if len(line) > 65536 or not line.endswith(b"\n"):
                 raise ValueError("Request is too large or incomplete")
-            answer = dispatch(self.server.state, json.loads(line))
+            request = json.loads(line)
+            self.server.note_client(request)
+            answer = dispatch(self.server.state, request)
         except (ValueError, OSError, subprocess.SubprocessError) as error:
             answer = {"ok": False, "error": str(error)}
+        answer.update({"service_version": __version__,
+                       "protocol_version": PROTOCOL_VERSION, "service_pid": os.getpid()})
         self.wfile.write((json.dumps(answer) + "\n").encode())
 
 
@@ -166,7 +171,28 @@ class ServiceServer(socketserver.ThreadingUnixStreamServer):
     def __init__(self, path, state):
         super().__init__(str(path), RequestHandler)
         self.state = state
+        self.client_lock = threading.Lock()
+        self.seen_clients = set()
         os.chmod(path, 0o600)
+
+    def note_client(self, request):
+        if not isinstance(request, dict):
+            return
+        client = request.get("client")
+        version = request.get("client_version")
+        protocol = request.get("protocol_version")
+        pid = request.get("client_pid")
+        if (not isinstance(client, str) or not isinstance(version, str) or
+                not isinstance(protocol, int) or not isinstance(pid, int)):
+            return
+        key = (client, pid if client == "gui" else None, version, protocol)
+        with self.client_lock:
+            if key in self.seen_clients:
+                return
+            self.seen_clients.add(key)
+        log(f"client connected kind={client} pid={pid} version={version} "
+            f"protocol={protocol} service_version={__version__} "
+            f"service_protocol={PROTOCOL_VERSION}")
 
 
 def serve(path=SERVICE_SOCKET, inventory_path=SESSIONS_FILE):

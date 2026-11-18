@@ -68,7 +68,9 @@ class SessionLaunchTest(unittest.TestCase):
              patch("sessionlaunch.GROUPS_FILE", Path(directory) / "groups.json"), \
              patch("sessionlaunch.APPEARANCE_FILE", Path(directory) / "appearance.json"), \
              patch("sessionlaunch.sessionlaunch_service_client.request",
-                   return_value={"ok": True, "revision": 7, "data": data}) as service, \
+                   return_value={"ok": True, "revision": 7, "data": data,
+                                 "service_pid": 42, "service_version": "0.2.2",
+                                 "protocol_version": 1}) as service, \
              patch("inventory.update") as direct, \
              patch("sessionlaunch.HotlistServer.start"), \
              patch.object(SessionLaunch, "refresh_agents"):
@@ -77,8 +79,9 @@ class SessionLaunchTest(unittest.TestCase):
             try:
                 self.assertTrue(window.service_available)
                 self.assertEqual(window.service_revision, 7)
+                self.assertEqual(window.service_peer, (42, "0.2.2", 1))
                 self.assertEqual(window.live_data, data)
-                service.assert_called_once_with("snapshot", since=None)
+                service.assert_called_once_with("snapshot", since=None, client="gui")
                 direct.assert_not_called()
             finally:
                 window.close()
