@@ -8,6 +8,7 @@ out="$repo_root/_site"
 theme="$site_dir/theme"
 canonical=https://toppk.github.io/sessionlaunch
 edit=https://github.com/toppk/sessionlaunch/edit/master
+version=$(PYTHONPATH="$repo_root" python3 -c 'from session_launch import __version__; print(__version__)')
 
 # page|title|navigation section|source, in reading order.
 pages=(
@@ -72,6 +73,7 @@ for index in "${!pages[@]}"; do
     --template "$theme/template.html" \
     --lua-filter "$theme/horizon.lua" \
     --metadata-file "$site_dir/site.yaml" \
+    --metadata site-version="$version" \
     --metadata title="$title" \
     --metadata source="$name.md" \
     --metadata canonical="$canonical/$([[ "$name" == index ]] || printf '%s.html' "$name")" \

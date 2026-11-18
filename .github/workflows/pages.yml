@@ -6,6 +6,7 @@ on:
     paths:
       - 'site/**'
       - 'docs/**'
+      - 'session_launch/__init__.py'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 

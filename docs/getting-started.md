@@ -27,6 +27,7 @@ python3 -m pip install --user --no-deps dist/sessionlaunch-*.whl
 sessionlaunch install
 sessionlaunch status
 sessionlaunch gui
+sessionlaunch --version
 ```
 
 `sessionlaunch install` creates a private configuration directory and starts

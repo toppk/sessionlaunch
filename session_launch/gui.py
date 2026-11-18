@@ -46,7 +46,7 @@ from PySide6.QtWidgets import (
 )
 from shiboken6 import isValid
 
-from . import inventory
+from . import __version__, inventory
 from . import restore
 from . import agent_catalog
 from . import claude_peers
@@ -1743,6 +1743,9 @@ class SessionLaunch(QMainWindow):
         self.menu.addAction("Color key…", self.show_color_key)
         self.menu.addSeparator()
         self.menu.addAction("Show / hide details", self.toggle_details)
+        self.menu.addAction("About SessionLaunch…", lambda: QMessageBox.about(
+            self, "About SessionLaunch", f"SessionLaunch {__version__}\n"
+            "Terminal and agent session organizer"))
         top.insertWidget(0, menu_button)
         for label, action in (("—", self.showMinimized), ("□", self.toggle_maximized),
                               ("×", self.close)):

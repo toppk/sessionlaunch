@@ -8,6 +8,8 @@ import sys
 import time
 from dataclasses import dataclass
 
+from . import __version__
+
 
 @dataclass(frozen=True)
 class Command:
@@ -22,6 +24,7 @@ class Command:
 # command can do, including commands that request a later GUI confirmation.
 COMMANDS = {
     "describe": Command("observe", "Describe available commands and effects", "cli", arguments="[COMMAND]"),
+    "version": Command("observe", "Show the SessionLaunch version", "cli"),
     "gui": Command("open-window", "Open the SessionLaunch window (default)", "gui"),
     "daemon": Command("run-service", "Run the terminal inventory service", "daemon"),
     "install": Command("write-and-start-service", "Install and start the user service", "installer"),
@@ -43,7 +46,8 @@ def usage():
         label = name + (" " + spec.arguments if spec.arguments else "")
         lines.append(f"  {label:<{width}}  {spec.summary}")
     lines.extend(("", "Run `sessionlaunch describe [COMMAND]` for effects and details.",
-                  "Run `sessionlaunch COMMAND --help` for command-specific options."))
+                  "Run `sessionlaunch COMMAND --help` for command-specific options.",
+                  "Run `sessionlaunch --version` for the installed version."))
     return "\n".join(lines)
 
 
@@ -70,12 +74,22 @@ def main(argv=None):
     if argv and argv[0] in ("-h", "--help", "help"):
         print(usage())
         return 0
+    if argv and argv[0] in ("-V", "--version"):
+        if len(argv) != 1:
+            raise SystemExit("usage: sessionlaunch --version")
+        print(f"sessionlaunch {__version__}")
+        return 0
     command = argv.pop(0) if argv else "gui"
     spec = COMMANDS.get(command)
     if spec is None:
         raise SystemExit(f"Unknown command: {command}\nRun `sessionlaunch describe` to list commands.")
     if command == "describe":
         return describe(argv)
+    if command == "version":
+        if argv:
+            raise SystemExit("usage: sessionlaunch version")
+        print(f"sessionlaunch {__version__}")
+        return 0
     if command == "gui":
         if argv:
             raise SystemExit("usage: sessionlaunch gui")
@@ -83,7 +97,8 @@ def main(argv=None):
         now = time.time()
         stamp = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(now))
         print(f"{stamp}.{int(now % 1 * 1000):03d} | INFO     | "
-              f"sessionlaunch.window - process starting pid={os.getpid()}", flush=True)
+              f"sessionlaunch.window - process starting version={__version__} "
+              f"pid={os.getpid()}", flush=True)
     module = importlib.import_module(f".{spec.module}", __package__)
     if command in ("hotlist", "request-revive"):
         return module.main(argv, action="request-revive" if command == "request-revive" else "observe")

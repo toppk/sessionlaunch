@@ -13,7 +13,7 @@ import threading
 import time
 from pathlib import Path
 
-from . import inventory
+from . import __version__, inventory
 from . import restore
 from .sessionlaunch_paths import SERVICE_SOCKET, SESSIONS_FILE, secure_config_dir
 
@@ -121,7 +121,8 @@ def dispatch(state, request):
     action = request.get("action")
     if action == "status":
         answer = state.snapshot(state.revision)
-        return {"ok": True, "pid": os.getpid(), "revision": answer["revision"],
+        return {"ok": True, "pid": os.getpid(), "version": __version__,
+                "revision": answer["revision"],
                 "warming": answer["warming"], "error": answer["error"]}
     if action == "snapshot":
         since = request.get("since")
@@ -170,7 +171,8 @@ class ServiceServer(socketserver.ThreadingUnixStreamServer):
 
 def serve(path=SERVICE_SOCKET, inventory_path=SESSIONS_FILE):
     path = Path(path)
-    log(f"starting pid={os.getpid()} socket={path} inventory={inventory_path}")
+    log(f"starting version={__version__} pid={os.getpid()} socket={path} "
+        f"inventory={inventory_path}")
     secure_config_dir()
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     if path.parent.stat().st_uid != os.getuid():

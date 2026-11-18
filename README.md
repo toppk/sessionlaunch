@@ -11,7 +11,8 @@ does not restore terminal screen contents, unsaved program state, or window
 geometry. Native Wayland window activation depends on compositor support.
 
 [Read the documentation](https://toppk.github.io/sessionlaunch/) ·
-[Session model](docs/session-model.md) · [MIT license](LICENSE)
+[Session model](docs/session-model.md) · [Changelog](CHANGELOG.md) ·
+[MIT license](LICENSE)
 
 ## Install and run
 
@@ -20,16 +21,15 @@ site, and `systemd --user` for the default terminal launch backend. X11 window
 controls use `wmctrl`; `xprop` helps verify xterm-style windows. A supported
 terminal emulator is also required: WezTerm, foot, Ghostty, xterm, or Revenant.
 
-Build and install the wheel in the Python environment you intend to use:
+Install this checkout in the Python environment you intend to use:
 
 ```sh
-python3 -m pip wheel --no-deps --no-build-isolation -w dist .
-python3 -m pip install --user --no-deps dist/sessionlaunch-*.whl
+python3 -m pip install --user --no-build-isolation .
 sessionlaunch install
 sessionlaunch gui
 ```
 
-The wheel requires `setuptools>=80` for a build without isolation. You can
+The install requires `setuptools>=80` for a build without isolation. You can
 instead use an isolated build if your package installer can fetch build
 requirements. The source checkout also supports `python3 sessionlaunch.py` for
 development. `sessionlaunch install` writes and starts a user systemd service;
@@ -45,6 +45,7 @@ sessionlaunch snapshot
 sessionlaunch sessions list --state dormant --limit 20
 sessionlaunch hotlist --hotlist PATH --search TEXT
 sessionlaunch request-revive --hotlist PATH --id UUID
+sessionlaunch --version
 ```
 
 `hotlist` only inspects an existing historical TOML file. `request-revive`
@@ -101,6 +102,23 @@ can be chosen in the GUI or set with `default_terminal` in the same file.
 `sessionlaunch COMMAND --help` before either action to see its arguments.
 
 ## Development
+
+The version has one source of truth: `session_launch/__init__.py`. The package
+build reads that value, and `sessionlaunch --version`, `sessionlaunch version`,
+and the GUI's **About SessionLaunch** menu display it. `sessionlaunch status`
+shows the running service's version, which may differ until it is restarted.
+For a new release, update
+that value and [CHANGELOG.md](CHANGELOG.md), verify the wheel's metadata, then
+tag the reviewed commit `vMAJOR.MINOR.PATCH`. Use a minor bump for new behavior
+and a patch bump for fixes during the 0.x series. A tag or push is a separate
+release step; changing the version does not publish anything.
+
+To verify a wheel before release, build it into an empty directory and check
+that its filename and `METADATA` both carry the new version:
+
+```sh
+python3 -m pip wheel --no-deps --no-build-isolation -w /tmp/sessionlaunch-wheel .
+```
 
 Run the focused tests with `python3 -m unittest discover -p 'test_*.py'`.
 The disposable X11 restore cycle is opt-in:

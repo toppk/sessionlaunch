@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sessionlaunch"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Terminal inventory and agent session organization"
 readme = "README.md"
 license = "MIT"
@@ -19,3 +19,6 @@ include = ["session_launch*"]
 
 [tool.setuptools.package-data]
 session_launch = ["sessionlaunch.service.in"]
+
+[tool.setuptools.dynamic]
+version = {attr = "session_launch.__version__"}

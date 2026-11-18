@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from session_launch import __version__
 from sessionlaunch_service import InventoryState, ServiceServer, dispatch
 from sessionlaunch_service_client import request
 
@@ -23,7 +24,9 @@ class ServiceTest(unittest.TestCase):
             thread.start()
             try:
                 self.assertEqual(path.stat().st_mode & 0o777, 0o600)
-                self.assertEqual(request("status", path=path)["revision"], 3)
+                status = request("status", path=path)
+                self.assertEqual(status["revision"], 3)
+                self.assertEqual(status["version"], __version__)
                 self.assertEqual(request("snapshot", path=path)["data"], state.data)
                 self.assertTrue(request("snapshot", path=path, since=3)["unchanged"])
                 with patch("sessionlaunch_service.subprocess.run") as run:
