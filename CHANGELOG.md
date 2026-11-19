@@ -4,6 +4,11 @@ SessionLaunch uses `MAJOR.MINOR.PATCH` version numbers. During the 0.x series,
 minor versions add features or change behavior; patch versions fix defects
 without intentionally changing the session data format.
 
+## 0.3.2 — 2026-11-19
+
+- Move automatic terminal-to-session organization migration into the service
+  scan, so it runs without an open GUI.
+
 ## 0.3.1 — 2026-11-19
 
 - Fix repository tag requests so the repository path is sent as data rather

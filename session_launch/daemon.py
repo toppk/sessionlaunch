@@ -18,7 +18,7 @@ from pathlib import Path
 from . import __version__, agent_catalog, agent_link, claude_peers, hotlist_ipc, inventory, manual_links, repo_tags, tag_migration
 from . import restore
 from .session_identity import agent_session_key
-from .session_identity import terminal_session_key
+from .session_identity import terminal_aliases, terminal_session_key
 from .sessionlaunch_paths import SERVICE_SOCKET, SESSIONS_FILE, private_write_text, secure_config_dir
 from .session_groups import SCHEMA_VERSION, SessionGroups
 from .service_protocol import PROTOCOL_VERSION
@@ -65,6 +65,11 @@ class InventoryState:
                         os.environ[key] = display[key]
                 self.last_graphics_refresh = time.monotonic()
             data = inventory.update(self.path)
+            with self.groups_lock:
+                moved = SessionGroups(self.groups_path).migrate_aliases(
+                    terminal_aliases(data.get("terminal", [])))
+            if moved:
+                log(f"migrated {moved} terminal organization aliases to session IDs")
             with self.lock:
                 if self.data is None or data.get("changed") or \
                         data.get("scan_status") != self.data.get("scan_status"):

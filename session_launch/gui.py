@@ -5268,7 +5268,7 @@ class SessionLaunch(QMainWindow):
                     data.get("scan_status") != self.live_data.get("scan_status")):
                 repo_tag_for.cache_clear()
                 self.live_data = data
-                if not self.groups_load_error:
+                if not self._service_state and not self.groups_load_error:
                     try:
                         moved = self.groups.migrate_aliases(terminal_aliases(data["terminal"]))
                         if moved:

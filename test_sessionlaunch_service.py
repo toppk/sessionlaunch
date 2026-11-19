@@ -89,6 +89,24 @@ class ServiceTest(unittest.TestCase):
                 self.assertEqual(update.call_count, 2)
                 freeze.assert_called_once_with(live["terminal"][0], path)
 
+    def test_service_migrates_terminal_aliases_without_a_gui(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = InventoryState(Path(directory) / "sessions.toml")
+            groups = SessionGroups(state.groups_path)
+            group_id = groups.create("review")
+            groups.assign(["terminal:pty:42"], group_id)
+            session_id = "4e5da2ba-0d5e-5c4d-a697-94d3a534ff4a"
+            data = {"session": [], "saved": [], "terminal": [{
+                "key": "pty:42", "state": "live", "agent": "codex",
+                "session_id": session_id}], "changed": True, "scan_status": "ok"}
+            with patch("sessionlaunch_service.inventory.update", return_value=data), \
+                 patch("sessionlaunch_service.x11_environment", return_value={}):
+                state.scan_once()
+            migrated = SessionGroups(state.groups_path)
+            self.assertNotIn("terminal:pty:42", migrated.memberships)
+            self.assertEqual(migrated.memberships[f"agent:codex:{session_id}"][0]["group"],
+                             group_id)
+
     def test_organization_revision_prevents_lost_keep_changes(self):
         with tempfile.TemporaryDirectory() as directory:
             state = InventoryState(Path(directory) / "sessions.toml")
