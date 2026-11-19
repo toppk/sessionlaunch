@@ -1,10 +1,10 @@
 # SessionLaunch
 
 SessionLaunch is a Python and PySide6 desktop prototype for finding, organizing,
-and returning to terminal and agent sessions. It inventories local PTYs, relates
-known Claude Code and Codex conversations to terminals, and keeps notes and
-groups available after a window closes. An optional user service maintains the
-inventory while the GUI is closed.
+and returning to terminal and agent sessions. Its per-user service inventories
+local PTYs, relates known Claude Code and Codex conversations to terminals, and
+keeps notes and groups available after a window closes. The GUI and CLI ask the
+service for session state.
 
 The prototype is built for a Linux desktop with X11 window management. It
 does not restore terminal screen contents, unsaved program state, or window
@@ -33,8 +33,8 @@ The install requires `setuptools>=80` for a build without isolation. You can
 instead use an isolated build if your package installer can fetch build
 requirements. The source checkout also supports `python3 sessionlaunch.py` for
 development. `sessionlaunch install` writes and starts a user systemd service;
-run `sessionlaunch status` to check it. The GUI works without that service but
-scans PTYs itself.
+run `sessionlaunch status` to check it. The GUI needs this service for session
+state and window actions. Presentation preferences remain local to the GUI.
 
 `sessionlaunch describe` lists command effects; `--format json` gives the same
 list to scripts. Useful commands include:
@@ -48,8 +48,9 @@ sessionlaunch request-revive --hotlist PATH --id UUID
 sessionlaunch --version
 ```
 
-`hotlist` only inspects an existing historical TOML file. `request-revive`
-sends stopped matches to a running GUI, which asks for confirmation before
+`hotlist` reads an explicitly chosen historical TOML file and asks the service
+for live process status. `request-revive` queues stopped matches through the
+service; the running GUI asks for confirmation before
 starting each agent. Neither command edits the hotlist. The GUI also previews
 the directory and command before an agent revival. A frozen foreground
 command can be replayed after confirmation, but a frozen Claude or Codex
@@ -91,7 +92,9 @@ may be missed. Closed terminal history expires after 90 days. Inventory
 records include command arguments and working directories, so treat the
 configuration directory as private data.
 
-Each service request carries the client's application and protocol versions;
+The [service ownership contract](docs/service-ownership.md) lists the state
+the service owns and the preferences clients may keep locally. Each service
+request carries the client's application and protocol versions;
 the reply carries the service versions. The GUI and service log the pair when
 they connect. Protocol version 1 is informational for now: a mismatch is
 visible in logs but does not block a request.

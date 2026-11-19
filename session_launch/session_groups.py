@@ -55,8 +55,9 @@ def annotation_hierarchy_key(line):
 
 
 class SessionGroups:
-    def __init__(self, path, load=True, migrate=True):
+    def __init__(self, path, load=True, migrate=True, data=None, writer=None):
         self.path = Path(path)
+        self.writer = writer
         self.groups = []
         self.domains = []
         self.memberships = {}
@@ -69,9 +70,10 @@ class SessionGroups:
         self.standing = set()
         self.lifecycle = {}
         self.retired = {}
-        if not load or not self.path.exists():
+        if not load or (data is None and not self.path.exists()):
             return
-        data = json.loads(self.path.read_text())
+        if data is None:
+            data = json.loads(self.path.read_text())
         if not isinstance(data, dict) or not isinstance(data.get("groups"), list):
             raise ValueError(f"Invalid group data: {self.path}")
         version = data.get("schema_version", 0)
@@ -179,7 +181,6 @@ class SessionGroups:
             self.save()
 
     def save(self):
-        self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = json.dumps({"schema_version": SCHEMA_VERSION,
                               "domains": self.domains,
                               "groups": [{**group, "sections": self.sections.get(group["id"], [])}
@@ -191,6 +192,10 @@ class SessionGroups:
                               "standing": sorted(self.standing),
                               "lifecycle": self.lifecycle,
                               "retired": self.retired}, indent=2) + "\n"
+        if self.writer is not None:
+            self.writer(payload)
+            return
+        self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = None
         try:
             with tempfile.NamedTemporaryFile("w", dir=self.path.parent,

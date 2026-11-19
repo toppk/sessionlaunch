@@ -44,8 +44,8 @@ reboot checklist can gather several conversations, with a final confirmation.
 
 ## What this prototype covers
 
-SessionLaunch runs on a Linux desktop with Python, PySide6, and an optional
-user service. Its X11 controls can raise, lower, and minimize windows when
+SessionLaunch runs on a Linux desktop with Python, PySide6, and a per-user
+service. Its X11 controls can raise, lower, and minimize windows when
 the terminal exposes a verifiable window ID. It can identify Claude Code and
 Codex sessions through their durable IDs and AgentsView metadata.
 

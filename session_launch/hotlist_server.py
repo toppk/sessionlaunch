@@ -11,36 +11,13 @@ from PySide6.QtCore import QObject, QTimer
 from PySide6.QtNetwork import QLocalServer
 from shiboken6 import isValid
 
-from . import agent_catalog
 from . import hotlist_ipc
 
 
 def validate_request(data):
     if not isinstance(data, dict) or data.get("action") != "revive":
         raise ValueError("Unknown request")
-    entries = data.get("sessions")
-    if not isinstance(entries, list) or not 1 <= len(entries) <= hotlist_ipc.MAX_BATCH:
-        raise ValueError(f"Expected 1–{hotlist_ipc.MAX_BATCH} sessions")
-    result = []
-    seen = set()
-    for entry in entries:
-        if not isinstance(entry, dict):
-            raise ValueError("Invalid session entry")
-        agent = entry.get("agent")
-        session_id = entry.get("id")
-        cwd = entry.get("cwd")
-        title = entry.get("title", "")
-        if (agent not in ("claude", "codex") or not isinstance(session_id, str)
-                or not agent_catalog.SESSION_ID.fullmatch(session_id)
-                or not isinstance(cwd, str) or not Path(cwd).is_absolute()
-                or not isinstance(title, str) or len(title) > 200):
-            raise ValueError("Invalid agent, session ID, directory, or title")
-        key = (agent, session_id.lower())
-        if key not in seen:
-            result.append({"agent": agent, "id": session_id.lower(),
-                           "cwd": cwd, "title": title})
-            seen.add(key)
-    return result
+    return hotlist_ipc.validate_entries(data.get("sessions"))
 
 
 class HotlistServer(QObject):

@@ -30,6 +30,7 @@ COMMANDS = {
     "install": Command("write-and-start-service", "Install and start the user service", "installer"),
     "status": Command("observe", "Show service status", "service_cli", ("status",)),
     "snapshot": Command("observe", "Summarize or export the live inventory", "service_cli", ("snapshot",)),
+    "agent-query": Command("observe", "Query AgentsView through the service", "service_cli", ("agent-query",), "MODE [ID]"),
     "raise": Command("raise-window", "Raise a verified X11 terminal window", "service_cli", ("raise",), "KEY"),
     "freeze": Command("save-record", "Save a live terminal's foreground command", "service_cli", ("freeze",), "KEY"),
     "sessions": Command("observe", "Search stored terminal and agent history", "sessions_cli", arguments="..."),

@@ -6,7 +6,6 @@ import os
 import tempfile
 import unittest
 from contextlib import redirect_stdout
-from subprocess import CalledProcessError, CompletedProcess
 from unittest.mock import patch
 from datetime import datetime
 from pathlib import Path
@@ -24,11 +23,70 @@ import manual_links
 from session_launch.session_groups import SessionGroups
 from sessionlaunch import (AnnotationDialog, LinkSessionDialog, card_presence, display_status,
                            elevation_reason, format_last_active,
-                           record_facets, tag_label, terminal_directory, ResizeSurface,
+                           record_facets, repo_tag_for, tag_label, terminal_directory, ResizeSurface,
                            SessionLaunch, SessionListModel)
 
 
 class SessionLaunchTest(unittest.TestCase):
+    def setUp(self):
+        # GUI tests must not inherit a developer's current visibility filters.
+        self.appearance_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.appearance_dir.cleanup)
+        appearance = patch("sessionlaunch.APPEARANCE_FILE",
+                           Path(self.appearance_dir.name) / "appearance.json")
+        appearance.start()
+        self.addCleanup(appearance.stop)
+
+    def test_repo_tag_request_keeps_service_socket_path(self):
+        repo_tag_for.cache_clear()
+        with patch.dict(os.environ, {"SESSIONLAUNCH_DISABLE_SERVICE": ""}), \
+             patch("sessionlaunch.sessionlaunch_service_client.request",
+                   return_value={"tag": "repo:example/project"}) as service:
+            self.assertEqual(repo_tag_for("/tmp/example-project"), "repo:example/project")
+        service.assert_called_once_with("repo_tag", repo_path="/tmp/example-project",
+                                        client="gui")
+
+    def test_production_gui_organization_uses_service_without_local_file(self):
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        QApplication.instance() or QApplication([])
+        data = {"session": [], "terminal": [], "saved": [], "scan_status": "ok"}
+        calls = []
+
+        def service(action, **fields):
+            calls.append((action, fields))
+            if action == "organization_get":
+                return {"revision": "first", "data": {"schema_version": 2,
+                        "groups": [], "memberships": {}}}
+            if action == "organization_put":
+                self.assertEqual(fields["revision"], "first")
+                return {"revision": "second"}
+            if action == "legacy_tags_get":
+                return {"tags": {}}
+            if action == "settings_get":
+                return {"settings": {"default_terminal": "xterm",
+                        "launch_backend": "systemd-user"}}
+            if action == "claude_peers":
+                return {"peers": {}}
+            if action == "snapshot":
+                return {"revision": 1, "data": data, "service_pid": 99,
+                        "service_version": "0.3.0", "protocol_version": 1}
+            raise AssertionError(f"Unexpected service action: {action}")
+
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.dict(os.environ, {"SESSIONLAUNCH_DISABLE_SERVICE": ""}), \
+             patch("sessionlaunch.SERVICE_SOCKET", Path(directory) / "service.socket"), \
+             patch("sessionlaunch.sessionlaunch_service_client.request", side_effect=service), \
+             patch.object(SessionLaunch, "refresh_agents"):
+            Path(directory, "service.socket").touch()
+            window = SessionLaunch([])
+            try:
+                self.assertTrue(window._service_state)
+                window.groups.create_domain("work")
+                self.assertEqual(window._groups_file_revision, "second")
+                self.assertEqual([action for action, _ in calls].count("organization_put"), 1)
+            finally:
+                window.close()
+
     def test_gui_reloads_external_groups_when_service_snapshot_is_unchanged(self):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         QApplication.instance() or QApplication([])
@@ -769,6 +827,7 @@ class SessionLaunchTest(unittest.TestCase):
         candidate = {"id": agent_id, "agent": "claude", "cwd": "/tmp"}
         with tempfile.TemporaryDirectory() as directory, \
              patch("sessionlaunch.GROUPS_FILE", Path(directory) / "groups.json"), \
+             patch("sessionlaunch.APPEARANCE_FILE", Path(directory) / "appearance.json"), \
              patch("manual_links.FILE", Path(directory) / "manual_links.json"), \
              patch("inventory.update", return_value=data), \
              patch("sessionlaunch.HotlistServer.start"), \
@@ -787,6 +846,7 @@ class SessionLaunchTest(unittest.TestCase):
                 window.refresh_list()
                 window.session_list.setCurrentIndex(
                     window.session_model.index_for_ref(("terminal", "window")))
+                self.assertEqual(window.selected_ref(), ("terminal", "window"))
                 with patch.object(window, "refresh_inventory"):
                     window.link_action()
                     canonical = f"agent:claude:{agent_id}"
@@ -1346,8 +1406,9 @@ class SessionLaunchTest(unittest.TestCase):
                 self.assertFalse(window.live_fields.isHidden())
                 self.assertFalse(window.process_table.isHidden())
                 output = io.StringIO()
-                with patch("sessionlaunch.subprocess.run", return_value=CompletedProcess(
-                        ["wmctrl", "-lxp"], 1, "", "Cannot open display")), \
+                with patch("sessionlaunch.sessionlaunch_service_client.request", return_value={
+                        "probe": {"returncode": 1, "lines": [],
+                                  "stderr": "Cannot open display", "properties": {}}}), \
                      redirect_stdout(output):
                     window.report_unraisable_saved(saved)
                 self.assertIn("| WARNING  | sessionlaunch.window - raise failed", output.getvalue())

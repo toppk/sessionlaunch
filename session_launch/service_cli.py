@@ -16,6 +16,10 @@ def main(argv=None):
     commands.add_parser("status")
     snapshot = commands.add_parser("snapshot")
     snapshot.add_argument("--json", action="store_true")
+    agent_query = commands.add_parser("agent-query")
+    agent_query.add_argument("mode", choices=("list", "get", "messages", "candidates"))
+    agent_query.add_argument("session_id", nargs="?")
+    agent_query.add_argument("cwd", nargs="?")
     for name in ("raise", "freeze"):
         command = commands.add_parser(name)
         command.add_argument("terminal_key")
@@ -41,6 +45,14 @@ def main(argv=None):
                       f"terminals={len(data.get('terminal', []))} "
                       f"live={sum(row.get('state') == 'live' for row in data.get('terminal', []))} "
                       f"frozen={len(data.get('saved', []))}")
+        elif args.command == "agent-query":
+            fields = {"mode": args.mode}
+            if args.mode == "candidates":
+                fields.update(provider=args.session_id, cwd=args.cwd)
+            elif args.mode in ("get", "messages"):
+                fields["session_id"] = args.session_id
+            answer = request("agent_query", path=args.socket, timeout=90, **fields)
+            print(json.dumps(answer["data"], ensure_ascii=False))
         else:
             answer = request(args.command, path=args.socket, timeout=5,
                              terminal_key=args.terminal_key)

@@ -22,7 +22,16 @@ HOTLIST = (CONFIG_DIR / "hotlist.toml" if (CONFIG_DIR / "hotlist.toml").exists()
 
 
 def live_agents(proc_root=Path("/proc")):
-    """Read agents directly from proc, including ones without a visible PTY."""
+    """Ask the service for its current view of agent processes."""
+    if proc_root == Path("/proc"):
+        from . import sessionlaunch_service_client
+
+        return sessionlaunch_service_client.request("live_agents", client="cli")["agents"]
+    return scan_live_agents(proc_root)
+
+
+def scan_live_agents(proc_root=Path("/proc")):
+    """Service-side process scan, including agents without a visible PTY."""
     try:
         pids = [int(entry.name) for entry in proc_root.iterdir() if entry.name.isdecimal()]
     except OSError as error:

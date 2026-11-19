@@ -31,8 +31,9 @@ sessionlaunch --version
 ```
 
 `sessionlaunch install` creates a private configuration directory and starts
-the user inventory service. The GUI can also run without the service and scan
-PTYs itself. For development in the checkout, run `python3 sessionlaunch.py`.
+the user service. The GUI and CLI use that service for session state. For
+development in the checkout, run `python3 sessionlaunch.py` with the service
+installed from the same checkout.
 
 ## Find and organize
 

@@ -84,6 +84,17 @@ def candidates(provider, cwd):
                    agent_catalog.resume_argv(row)), key=_started, reverse=True)
 
 
+def verify_session(provider, session_id, cwd):
+    """Confirm a manually selected UUID against a fresh AgentsView record."""
+    result = _query("session", "get", session_id, "--json")
+    row = result.get("session", result) if isinstance(result, dict) else {}
+    if (not isinstance(row, dict) or row.get("agent") != provider or
+            str(row.get("id", "")).removeprefix("codex:").lower() != session_id.lower() or
+            not row.get("cwd") or os.path.realpath(row["cwd"]) != os.path.realpath(cwd)):
+        raise ValueError("AgentsView session no longer matches this provider and directory")
+    return row
+
+
 if __name__ == "__main__":
     if len(sys.argv) != 4 or sys.argv[1] != "--candidates":
         sys.exit("usage: agent_link.py --candidates PROVIDER CWD")

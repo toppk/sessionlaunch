@@ -10,10 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .time_display import format_datetime
-from .sessionlaunch_paths import LEGACY_SESSIONS_FILE, SESSIONS_FILE
-
-
-DEFAULT_FILE = SESSIONS_FILE if SESSIONS_FILE.exists() else LEGACY_SESSIONS_FILE
+from .sessionlaunch_service_client import request
 
 
 def timestamp(value):
@@ -181,8 +178,8 @@ def add_filters(parser):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--file", type=Path, default=DEFAULT_FILE,
-                        help="Inventory TOML (default: SessionLaunch config directory)")
+    parser.add_argument("--file", type=Path,
+                        help="Inspect an explicit TOML export instead of the live service")
     commands = parser.add_subparsers(dest="action", required=True)
     listing = commands.add_parser("list", help="List terminals, observed agents, or frozen commands")
     listing.add_argument("--kind", choices=("terminal", "agent", "saved", "all"),
@@ -195,9 +192,15 @@ def main(argv=None):
     detail.add_argument("id")
     args = parser.parse_args(argv)
     try:
-        with args.file.open("rb") as stream:
-            data = tomllib.load(stream)
-    except (OSError, tomllib.TOMLDecodeError) as error:
+        if args.file:
+            with args.file.open("rb") as stream:
+                data = tomllib.load(stream)
+        else:
+            response = request("snapshot", client="cli", timeout=5)
+            if response.get("warming") or response.get("data") is None:
+                raise ValueError("SessionLaunch service is still scanning")
+            data = response["data"]
+    except (OSError, ValueError, KeyError, tomllib.TOMLDecodeError) as error:
         parser.error(str(error))
     if args.action == "show":
         found = [row for row in rows(data, args.kind) if row["id"].startswith(args.id)]

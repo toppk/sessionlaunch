@@ -1,4 +1,4 @@
-"""Small local request protocol for asking the running GUI to revive hotlist entries."""
+"""Validate and queue hotlist revival requests without launching agents."""
 
 import json
 import os
@@ -10,6 +10,32 @@ MAX_REQUEST_BYTES = 65536
 MAX_BATCH = 20
 
 
+def validate_entries(entries):
+    """Return deduplicated requests suitable for the GUI confirmation queue."""
+    from . import agent_catalog
+
+    if not isinstance(entries, list) or not 1 <= len(entries) <= MAX_BATCH:
+        raise ValueError(f"Expected 1–{MAX_BATCH} sessions")
+    result = []
+    seen = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ValueError("Invalid session entry")
+        agent, session_id = entry.get("agent"), entry.get("id")
+        cwd, title = entry.get("cwd"), entry.get("title", "")
+        if (agent not in ("claude", "codex") or not isinstance(session_id, str)
+                or not agent_catalog.SESSION_ID.fullmatch(session_id)
+                or not isinstance(cwd, str) or not Path(cwd).is_absolute()
+                or not isinstance(title, str) or len(title) > 200):
+            raise ValueError("Invalid agent, session ID, directory, or title")
+        key = (agent, session_id.lower())
+        if key not in seen:
+            result.append({"agent": agent, "id": session_id.lower(),
+                           "cwd": cwd, "title": title})
+            seen.add(key)
+    return result
+
+
 def socket_path():
     runtime = os.environ.get("XDG_RUNTIME_DIR")
     root = Path(runtime) if runtime else Path(os.environ.get(
@@ -18,12 +44,16 @@ def socket_path():
 
 
 def request_revive(rows, path=None):
-    """Queue requests with the GUI. An acknowledgement does not mean they were launched."""
+    """Queue requests with the service. An acknowledgement is never a launch."""
     entries = [{"agent": row["agent"], "id": row["id"],
                 "cwd": row["repo"], "title": row.get("title", "")}
                for row in rows]
-    if not entries or len(entries) > MAX_BATCH:
-        raise ValueError(f"Choose between 1 and {MAX_BATCH} sessions")
+    entries = validate_entries(entries)
+    if path is None:
+        from . import sessionlaunch_service_client
+
+        return sessionlaunch_service_client.request(
+            "revive_queue", sessions=entries, client="cli")["queued"]
     payload = (json.dumps({"action": "revive", "sessions": entries}) + "\n").encode()
     if len(payload) > MAX_REQUEST_BYTES:
         raise ValueError("Request is too large")

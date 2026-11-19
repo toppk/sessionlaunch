@@ -2,6 +2,7 @@
 """Headless owner of PTY history, available to the GUI and command line."""
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -14,9 +15,12 @@ import threading
 import time
 from pathlib import Path
 
-from . import __version__, inventory
+from . import __version__, agent_catalog, agent_link, claude_peers, hotlist_ipc, inventory, manual_links, repo_tags, tag_migration
 from . import restore
-from .sessionlaunch_paths import SERVICE_SOCKET, SESSIONS_FILE, secure_config_dir
+from .session_identity import agent_session_key
+from .session_identity import terminal_session_key
+from .sessionlaunch_paths import SERVICE_SOCKET, SESSIONS_FILE, private_write_text, secure_config_dir
+from .session_groups import SCHEMA_VERSION, SessionGroups
 from .service_protocol import PROTOCOL_VERSION
 
 
@@ -31,6 +35,16 @@ def log(message):
 class InventoryState:
     def __init__(self, path=SESSIONS_FILE, interval=5.0):
         self.path = Path(path)
+        self.groups_path = self.path.parent / "groups.json"
+        self.links_path = self.path.parent / "manual_links.json"
+        self.settings_path = self.path.parent / "settings.toml"
+        self.tags_path = self.path.parent / "tags.json"
+        self.rcfile_path = self.path.parent / "startup.bashrc"
+        self.launches = {}
+        self.launch_lock = threading.Lock()
+        self.revive_lock = threading.Lock()
+        self.revive_queue = []
+        self.groups_lock = threading.Lock()
         self.interval = interval
         self.lock = threading.Lock()
         self.scan_lock = threading.Lock()
@@ -45,7 +59,8 @@ class InventoryState:
         with self.scan_lock:
             if time.monotonic() - self.last_graphics_refresh >= 30:
                 display = x11_environment()
-                for key in ("DISPLAY", "XAUTHORITY"):
+                for key in ("DISPLAY", "XAUTHORITY", "WAYLAND_DISPLAY",
+                            "DBUS_SESSION_BUS_ADDRESS", "PATH"):
                     if display.get(key):
                         os.environ[key] = display[key]
                 self.last_graphics_refresh = time.monotonic()
@@ -104,6 +119,202 @@ class InventoryState:
                              if row.get("key") == key and row.get("state") == "live"), None)
             return terminal.get("window_id") if terminal else None
 
+    def organization(self, since=None):
+        with self.groups_lock:
+            if self.groups_path.exists():
+                SessionGroups(self.groups_path)  # Validate and migrate on the owner.
+                raw = self.groups_path.read_bytes()
+                document = json.loads(raw)
+            else:
+                document = {"schema_version": SCHEMA_VERSION, "groups": [],
+                            "memberships": {}}
+                raw = b""
+            revision = hashlib.sha256(raw).hexdigest()
+            result = {"ok": True, "revision": revision}
+            if since == revision:
+                result["unchanged"] = True
+            else:
+                result["data"] = document
+            return result
+
+    def save_organization(self, document, expected_revision):
+        if not isinstance(document, dict) or document.get("schema_version") != SCHEMA_VERSION:
+            raise ValueError("Unsupported organization document")
+        if not isinstance(expected_revision, str):
+            raise ValueError("Organization revision is required")
+        with self.groups_lock:
+            raw = self.groups_path.read_bytes() if self.groups_path.exists() else b""
+            if hashlib.sha256(raw).hexdigest() != expected_revision:
+                raise ValueError("Organization changed in another client; reload and retry")
+            SessionGroups(self.groups_path, data=document, migrate=False)
+            private_write_text(self.groups_path, json.dumps(document, indent=2) + "\n")
+            revision = hashlib.sha256(self.groups_path.read_bytes()).hexdigest()
+            return {"ok": True, "revision": revision}
+
+    def change_manual_link(self, request, unlink=False):
+        key = request.get("terminal_key")
+        if not isinstance(key, str) or not key:
+            raise ValueError("Terminal key is required")
+        if not unlink:
+            provider, session_id, cwd = (request.get("provider"),
+                                         request.get("session_id"), request.get("cwd"))
+            if not agent_session_key(provider, session_id) or not isinstance(cwd, str):
+                raise ValueError("Invalid manual agent link")
+            agent_link.verify_session(provider, session_id, cwd)
+        with self.scan_lock, self.groups_lock:
+            fresh = inventory.update(self.path)
+            with self.lock:
+                self.data = fresh
+                self.revision += 1
+                terminal = next((row for row in fresh.get("terminal", [])
+                                 if row.get("key") == key and row.get("state") == "live"), None)
+            if not terminal:
+                raise ValueError("Live terminal no longer found")
+            links = manual_links.load(self.links_path)
+            alias = f"terminal:{key}"
+            groups = SessionGroups(self.groups_path)
+            if unlink:
+                link = links.get(key)
+                if not link or not manual_links.matches(terminal, link):
+                    raise ValueError("Manual link no longer matches this process")
+                canonical = agent_session_key(link["provider"], link["session_id"])
+                links.pop(key)
+                manual_links.save(links, self.links_path)
+                try:
+                    groups.unlink_terminal(alias, canonical, link.get("moved_metadata", False))
+                except (OSError, ValueError):
+                    links[key] = link
+                    manual_links.save(links, self.links_path)
+                    raise
+            else:
+                provider = request.get("provider")
+                session_id = request.get("session_id")
+                canonical = agent_session_key(provider, session_id)
+                if not canonical or terminal.get("agent") != provider:
+                    raise ValueError("Agent provider or session ID does not match terminal")
+                if (terminal.get("agent_pid") != request.get("agent_pid") or
+                        terminal.get("agent_start_ticks") != request.get("agent_start_ticks") or
+                        (terminal.get("agent_cwd") or terminal.get("cwd")) != request.get("cwd")):
+                    raise ValueError("Agent process changed during linking")
+                if any(other.get("key") != key and other.get("state") == "live" and
+                       other.get("agent") == provider and
+                       other.get("session_id") == session_id
+                       for other in fresh.get("terminal", [])):
+                    raise ValueError("Session UUID is already attached to another terminal")
+                if key in links and manual_links.matches(terminal, links[key]):
+                    raise ValueError("Terminal already has a manual link")
+                moved = groups.link_terminal(alias, canonical)
+                links[key] = {"terminal_key": key, "provider": provider,
+                              "session_id": session_id,
+                              "agent_pid": request["agent_pid"],
+                              "agent_start_ticks": request["agent_start_ticks"],
+                              "cwd": request["cwd"], "moved_metadata": moved}
+                try:
+                    manual_links.save(links, self.links_path)
+                except OSError:
+                    groups.unlink_terminal(alias, canonical, moved)
+                    raise
+            data = inventory.update(self.path)
+            with self.lock:
+                self.data = data
+                self.revision += 1
+            return {"ok": True, "revision": self.revision}
+
+    def legacy_tags(self):
+        if not self.tags_path.exists():
+            return {}
+        data = json.loads(self.tags_path.read_text())
+        if not isinstance(data, dict):
+            raise ValueError("Invalid legacy tag file")
+        return data
+
+    def migrate_legacy_tags(self, plan, identities):
+        if not isinstance(plan, dict) or not isinstance(identities, dict) or not all(
+                isinstance(key, str) and isinstance(value, str)
+                for key, value in identities.items()):
+            raise ValueError("Invalid tag migration request")
+        with self.groups_lock:
+            groups = SessionGroups(self.groups_path)
+            tags = self.legacy_tags()
+            if set(identities) != set(tags):
+                raise ValueError("Tag identities changed; reload before migrating")
+            tag_migration.apply_migration(groups, tags, plan,
+                                          identities.__getitem__, self.tags_path)
+            return {"ok": True}
+
+    def launch_terminal(self, request):
+        name = request.get("terminal")
+        directory = request.get("directory")
+        title = request.get("title")
+        command = request.get("command")
+        identity = request.get("identity", "")
+        frozen_id = request.get("frozen_id", "")
+        shell = request.get("shell", "")
+        if name not in restore.TERMINALS or not all(
+                isinstance(value, str) for value in
+                (directory, title, command, identity, frozen_id, shell)) or \
+                not directory or not command or len(command) > 65536 or len(title) > 200:
+            raise ValueError("Invalid terminal launch request")
+        if len(identity) > 200:
+            raise ValueError("Invalid launch identity")
+        with self.scan_lock, self.launch_lock:
+            fresh = inventory.update(self.path)
+            with self.lock:
+                self.data = fresh
+                self.revision += 1
+            if identity and any(row.get("state") == "live" and
+                                terminal_session_key(row) == identity
+                                for row in fresh.get("terminal", [])):
+                raise ValueError("Session is already running")
+            if identity.startswith("agent:"):
+                parts = identity.split(":", 2)
+                if len(parts) != 3 or agent_session_key(parts[1], parts[2]) != identity:
+                    raise ValueError("Invalid agent launch identity")
+                if parts[1] == "claude" and claude_peers.peer_for(
+                        parts[2], claude_peers.read_peers()):
+                    raise ValueError("Claude session is already running as a peer")
+                if unlinked := agent_catalog.unlinked_running_terminal(
+                        {"agent": parts[1], "cwd": directory}, fresh.get("terminal", [])):
+                    raise ValueError(f"Agent may already be running unlinked in "
+                                     f"{unlinked.get('pty') or 'another terminal'}; link it first")
+            if identity and any(entry["identity"] == identity and
+                                entry["handle"].poll() is None
+                                for entry in self.launches.values()):
+                raise ValueError("Session is already starting")
+            graphical = x11_environment()
+            for key in ("DISPLAY", "XAUTHORITY", "WAYLAND_DISPLAY",
+                        "DBUS_SESSION_BUS_ADDRESS", "PATH"):
+                if value := graphical.get(key):
+                    os.environ[key] = value
+            restore.install_rcfile(self.rcfile_path)
+            handle = restore.launch(name, directory, title, command, self.rcfile_path,
+                                    frozen_id, shell,
+                                    restore.read_settings(self.settings_path)["launch_backend"])
+            launch_id = f"launch-{os.urandom(16).hex()}"
+            self.launches[launch_id] = {"handle": handle, "identity": identity}
+            return {"ok": True, "launch_id": launch_id,
+                    "unit": getattr(handle, "unit", "")}
+
+    def launch_status(self, launch_id):
+        if not isinstance(launch_id, str):
+            raise ValueError("Launch ID is required")
+        with self.launch_lock:
+            entry = self.launches.get(launch_id)
+            if entry is None:
+                return {"ok": True, "exit_code": 1}
+            return {"ok": True, "exit_code": entry["handle"].poll()}
+
+    def queue_revives(self, entries):
+        rows = hotlist_ipc.validate_entries(entries)
+        with self.revive_lock:
+            self.revive_queue.extend(rows)
+        return {"ok": True, "queued": len(rows)}
+
+    def take_revives(self):
+        with self.revive_lock:
+            rows, self.revive_queue = self.revive_queue, []
+        return {"ok": True, "sessions": rows}
+
 
 def x11_environment():
     """Read current display credentials even if the service predates login."""
@@ -113,7 +324,8 @@ def x11_environment():
                                 capture_output=True, text=True, timeout=3, check=True)
         for line in result.stdout.splitlines():
             key, separator, value = line.partition("=")
-            if separator and key in ("DISPLAY", "XAUTHORITY"):
+            if separator and key in ("DISPLAY", "XAUTHORITY", "WAYLAND_DISPLAY",
+                                     "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "PATH"):
                 env[key] = value
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
         pass
@@ -124,6 +336,34 @@ def listed_windows():
     result = subprocess.run(["wmctrl", "-lxp"], env=x11_environment(),
                             capture_output=True, text=True, timeout=3, check=True)
     return result.stdout.splitlines()
+
+
+def window_probe(window_ids):
+    """Gather X11 failure evidence on the process that owns window inspection."""
+    if not isinstance(window_ids, list) or len(window_ids) > 20 or not all(
+            isinstance(value, str) and re.fullmatch(r"(?:0x[0-9a-fA-F]+|[0-9]+)", value)
+            for value in window_ids):
+        raise ValueError("Invalid window IDs")
+    env = x11_environment()
+    try:
+        result = subprocess.run(["wmctrl", "-lxp"], env=env, capture_output=True,
+                                text=True, timeout=3, check=False)
+        answer = {"returncode": result.returncode, "lines": result.stdout.splitlines(),
+                  "stderr": result.stderr.strip(), "properties": {}}
+    except (OSError, subprocess.TimeoutExpired) as error:
+        answer = {"returncode": None, "lines": [], "stderr": str(error),
+                  "properties": {}}
+    for value in window_ids:
+        try:
+            result = subprocess.run(
+                ["xprop", "-id", value, "_NET_WM_PID", "WM_CLASS", "WM_NAME"],
+                env=env, capture_output=True, text=True, timeout=2, check=False)
+            answer["properties"][value] = {"returncode": result.returncode,
+                                           "stdout": result.stdout.strip(),
+                                           "stderr": result.stderr.strip()}
+        except (OSError, subprocess.TimeoutExpired) as error:
+            answer["properties"][value] = {"error": str(error)}
+    return answer
 
 
 def window_from_token(token):
@@ -184,6 +424,83 @@ def dispatch(state, request):
         if since is not None and not isinstance(since, int):
             raise ValueError("since must be a revision number")
         return state.snapshot(since)
+    if action == "organization_get":
+        since = request.get("since")
+        if since is not None and not isinstance(since, str):
+            raise ValueError("Organization revision must be a string")
+        return state.organization(since)
+    if action == "organization_put":
+        return state.save_organization(request.get("data"), request.get("revision"))
+    if action == "manual_link":
+        return state.change_manual_link(request)
+    if action == "manual_unlink":
+        return state.change_manual_link(request, unlink=True)
+    if action == "settings_get":
+        return {"ok": True, "settings": restore.read_settings(state.settings_path)}
+    if action == "settings_set_terminal":
+        restore.write_settings(state.settings_path, request.get("terminal"))
+        return {"ok": True, "settings": restore.read_settings(state.settings_path)}
+    if action == "legacy_tags_get":
+        return {"ok": True, "tags": state.legacy_tags()}
+    if action == "legacy_tags_migrate":
+        return state.migrate_legacy_tags(request.get("plan"), request.get("identities"))
+    if action == "launch_terminal":
+        return state.launch_terminal(request)
+    if action == "launch_status":
+        return state.launch_status(request.get("launch_id"))
+    if action == "live_agents":
+        from .hotlist_cli import scan_live_agents
+
+        return {"ok": True, "agents": scan_live_agents()}
+    if action == "revive_queue":
+        return state.queue_revives(request.get("sessions"))
+    if action == "revive_take":
+        return state.take_revives()
+    if action == "window_probe":
+        return {"ok": True, "probe": window_probe(request.get("window_ids"))}
+    if action == "claude_peers":
+        known = request.get("known_pids", [])
+        if not isinstance(known, list) or len(known) > 1000 or not all(
+                isinstance(pid, int) and pid > 0 for pid in known):
+            raise ValueError("Invalid known peer PIDs")
+        dead = []
+        for pid in known:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                dead.append(pid)
+            except PermissionError:
+                pass
+        return {"ok": True, "peers": claude_peers.read_peers(), "dead_pids": dead}
+    if action == "repo_tag":
+        path = request.get("repo_path")
+        if not isinstance(path, str) or len(path) > 8192:
+            raise ValueError("Invalid repository path")
+        return {"ok": True, "tag": repo_tags.repo_tag_for(path)}
+    if action == "agent_query":
+        mode = request.get("mode")
+        session_id = request.get("session_id")
+        if mode == "list":
+            argv = ["session", "list", "--json", "--limit", "500", "--sort", "recent"]
+        elif mode in ("get", "messages") and isinstance(session_id, str) and \
+                0 < len(session_id) <= 128:
+            argv = (["session", "get", session_id, "--json"] if mode == "get" else
+                    ["session", "messages", session_id, "--direction", "desc",
+                     "--limit", "8", "--role", "user,assistant", "--json"])
+        elif mode == "candidates":
+            provider, cwd = request.get("provider"), request.get("cwd")
+            if provider not in ("claude", "codex") or not isinstance(cwd, str) or \
+                    not cwd or len(cwd) > 8192:
+                raise ValueError("Invalid agent candidate request")
+            return {"ok": True, "data": agent_link.candidates(provider, cwd)}
+        else:
+            raise ValueError("Unknown agent query")
+        result = subprocess.run(["agentsview", *argv], capture_output=True,
+                                text=True, timeout=20, check=False)
+        if result.returncode:
+            raise ValueError(result.stderr.strip() or
+                             f"AgentsView exited {result.returncode}")
+        return {"ok": True, "data": json.loads(result.stdout)}
     if action == "freeze":
         key = request.get("terminal_key")
         if not isinstance(key, str) or not key:
@@ -215,7 +532,7 @@ class RequestHandler(socketserver.StreamRequestHandler):
             request = json.loads(line)
             self.server.note_client(request)
             answer = dispatch(self.server.state, request)
-        except (ValueError, OSError, subprocess.SubprocessError) as error:
+        except (ValueError, RuntimeError, OSError, subprocess.SubprocessError) as error:
             answer = {"ok": False, "error": str(error)}
         answer.update({"service_version": __version__,
                        "protocol_version": PROTOCOL_VERSION, "service_pid": os.getpid()})
