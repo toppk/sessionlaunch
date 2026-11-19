@@ -86,6 +86,35 @@ class SessionLaunchTest(unittest.TestCase):
             finally:
                 window.close()
 
+    def test_gui_refreshes_snapshot_when_service_restart_reuses_revision(self):
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        QApplication.instance() or QApplication([])
+        before = {"session": [], "terminal": [], "saved": [], "scan_status": "ok",
+                  "changed": True}
+        after = {**before, "scan_status": "unavailable"}
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.dict(os.environ, {"SESSIONLAUNCH_DISABLE_SERVICE": ""}), \
+             patch("sessionlaunch.SERVICE_SOCKET", Path(directory) / "service.socket"), \
+             patch("sessionlaunch.GROUPS_FILE", Path(directory) / "groups.json"), \
+             patch("sessionlaunch.APPEARANCE_FILE", Path(directory) / "appearance.json"), \
+             patch("sessionlaunch.sessionlaunch_service_client.request", side_effect=[
+                 {"revision": 1, "data": before, "service_pid": 41},
+                 {"revision": 1, "unchanged": True, "service_pid": 42},
+                 {"revision": 1, "data": after, "service_pid": 42}]) as service, \
+             patch("sessionlaunch.HotlistServer.start"), \
+             patch.object(SessionLaunch, "refresh_agents"):
+            Path(directory, "service.socket").touch()
+            window = SessionLaunch([])
+            try:
+                window.refresh_inventory()
+                self.assertEqual(window.live_data, after)
+                self.assertEqual(window.service_peer[0], 42)
+                self.assertEqual(window.service_revision, 1)
+                self.assertEqual(service.call_args_list[-1].kwargs,
+                                 {"client": "gui"})
+            finally:
+                window.close()
+
     def test_titlebar_menu_contains_theme_and_color_key(self):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         QApplication.instance() or QApplication([])

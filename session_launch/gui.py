@@ -5157,6 +5157,13 @@ class SessionLaunch(QMainWindow):
                 peer = (response.get("service_pid"), response.get("service_version"),
                         response.get("protocol_version"))
                 if peer != self.service_peer:
+                    # Revisions belong to one service process. After a restart,
+                    # the new process may reach the same number as the old one.
+                    if self.service_peer is not None and peer[0] != self.service_peer[0]:
+                        self.service_revision = None
+                        if response.get("unchanged"):
+                            response = sessionlaunch_service_client.request(
+                                "snapshot", client="gui")
                     self.service_peer = peer
                     console_log("INFO", f"service connected gui={__version__} "
                                 f"service={peer[1] or 'unknown'} "
