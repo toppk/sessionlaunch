@@ -344,39 +344,12 @@ def local_retired_date(value):
 
 
 def find_window(token):
-    result = subprocess.run(["wmctrl", "-lxp"], capture_output=True, text=True,
-                            check=False)
-    if result.returncode:
+    try:
+        return sessionlaunch_service_client.request(
+            "window_find", token=token, client="gui")["window_id"]
+    except (OSError, ValueError, KeyError) as error:
+        console_log("WARN", f"window lookup failed token={token}: {error}")
         return None
-    for line in result.stdout.splitlines():
-        fields = line.split(maxsplit=5)
-        if len(fields) == 6 and (token in fields[3] or token in fields[5]):
-            return fields[0]
-    return None
-
-
-def lower_window(window_id):
-    from Xlib import X, display
-
-    connection = display.Display()
-    try:
-        connection.create_resource_object("window", int(window_id, 16)).configure(
-            stack_mode=X.Below)
-        connection.sync()
-    finally:
-        connection.close()
-
-
-def minimize_window(window_id):
-    from Xlib import display
-
-    connection = display.Display()
-    try:
-        connection.create_resource_object("window", int(window_id, 16)).iconify(
-            connection.get_default_screen())
-        connection.sync()
-    finally:
-        connection.close()
 
 
 def apply_theme(app, theme, zoom):
@@ -5576,17 +5549,11 @@ class SessionLaunch(QMainWindow):
 
     def act_window(self, window_id, action):
         try:
-            if action == "raise":
-                subprocess.run(["wmctrl", "-ia", window_id], check=True)
-            elif action == "lower":
-                lower_window(window_id)
-            elif action == "minimize":
-                minimize_window(window_id)
-            elif action == "maximize":
-                subprocess.run(["wmctrl", "-ir", window_id, "-b",
-                                "toggle,maximized_vert,maximized_horz"], check=True)
+            sessionlaunch_service_client.request(
+                "window_action", window_id=window_id, operation=action,
+                client="gui", timeout=5)
             return True
-        except (OSError, subprocess.CalledProcessError) as error:
+        except (OSError, ValueError) as error:
             console_log("ERROR", f"window action={action} id={window_id} failed: {error}")
             QMessageBox.warning(self, "Window control failed", str(error))
             return False

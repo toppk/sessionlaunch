@@ -1354,8 +1354,8 @@ class SessionLaunchTest(unittest.TestCase):
                 self.assertIn("pty=/dev/pts/9", output.getvalue())
                 self.assertIn("wmctrl -lxp rc=1", output.getvalue())
                 output = io.StringIO()
-                with patch("sessionlaunch.subprocess.run", side_effect=CalledProcessError(
-                        1, ["wmctrl", "-ia", "0x1"])), \
+                with patch("sessionlaunch.sessionlaunch_service_client.request",
+                           side_effect=ValueError("X11 window action failed")), \
                      patch("sessionlaunch.QMessageBox.warning"), redirect_stdout(output):
                     self.assertFalse(window.act_window("0x1", "raise"))
                 self.assertIn("| ERROR    | sessionlaunch.window - window action=raise",

@@ -42,6 +42,16 @@ class ServiceTest(unittest.TestCase):
                                              terminal_key="pty:42")["window_id"], "0x123")
                     self.assertEqual(run.call_args_list[-1].args[0],
                                      ["wmctrl", "-ia", "0x123"])
+                    run.return_value.stdout = "0x123 0 42 host.class localhost sessionlaunch-abc\n"
+                    self.assertEqual(request("window_find", path=path,
+                                             token="sessionlaunch-abc")["window_id"], "0x123")
+                    request("window_action", path=path, window_id="0x123",
+                            operation="maximize")
+                    self.assertEqual(run.call_args_list[-1].args[0][:3],
+                                     ["wmctrl", "-ir", "0x123"])
+                with self.assertRaisesRegex(ValueError, "Invalid X11 window ID"):
+                    request("window_action", path=path, window_id="not-a-window",
+                            operation="raise")
                 with self.assertRaisesRegex(ValueError, "No X11 window"):
                     request("raise", path=path, terminal_key="missing")
             finally:

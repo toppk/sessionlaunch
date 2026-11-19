@@ -4,6 +4,7 @@
 import argparse
 import json
 import os
+import re
 import signal
 import socket
 import socketserver
@@ -17,6 +18,9 @@ from . import __version__, inventory
 from . import restore
 from .sessionlaunch_paths import SERVICE_SOCKET, SESSIONS_FILE, secure_config_dir
 from .service_protocol import PROTOCOL_VERSION
+
+
+WINDOW_ID = re.compile(r"0x[0-9a-fA-F]+\Z")
 
 
 def log(message):
@@ -116,6 +120,56 @@ def x11_environment():
     return env
 
 
+def listed_windows():
+    result = subprocess.run(["wmctrl", "-lxp"], env=x11_environment(),
+                            capture_output=True, text=True, timeout=3, check=True)
+    return result.stdout.splitlines()
+
+
+def window_from_token(token):
+    if not isinstance(token, str) or not token.startswith("sessionlaunch-") or len(token) > 80:
+        raise ValueError("Invalid SessionLaunch window token")
+    for line in listed_windows():
+        fields = line.split(maxsplit=5)
+        if len(fields) == 6 and (token in fields[3] or token in fields[5]):
+            return fields[0]
+    return None
+
+
+def act_x11_window(window_id, action):
+    if not isinstance(window_id, str) or not WINDOW_ID.fullmatch(window_id):
+        raise ValueError("Invalid X11 window ID")
+    if action not in ("raise", "lower", "minimize", "maximize"):
+        raise ValueError("Unknown window action")
+    if action == "raise":
+        command = ["wmctrl", "-ia", window_id]
+    elif action == "maximize":
+        command = ["wmctrl", "-ir", window_id, "-b",
+                   "toggle,maximized_vert,maximized_horz"]
+    else:
+        from Xlib import X, display
+
+        for key, value in x11_environment().items():
+            if key in ("DISPLAY", "XAUTHORITY"):
+                os.environ[key] = value
+        try:
+            connection = display.Display()
+            try:
+                window = connection.create_resource_object("window", int(window_id, 16))
+                if action == "lower":
+                    window.configure(stack_mode=X.Below)
+                else:
+                    window.iconify(connection.get_default_screen())
+                connection.sync()
+            finally:
+                connection.close()
+        except Exception as error:
+            raise ValueError(f"X11 {action} failed: {error}") from error
+        return
+    subprocess.run(command, env=x11_environment(), capture_output=True,
+                   text=True, timeout=5, check=True)
+
+
 def dispatch(state, request):
     if not isinstance(request, dict):
         raise ValueError("Request must be an object")
@@ -142,9 +196,13 @@ def dispatch(state, request):
         window_id = state.x11_window(key)
         if not window_id:
             raise ValueError("No X11 window is linked to that live terminal")
-        subprocess.run(["wmctrl", "-ia", window_id], env=x11_environment(),
-                       capture_output=True, text=True, timeout=5, check=True)
+        act_x11_window(window_id, "raise")
         return {"ok": True, "window_id": window_id}
+    if action == "window_find":
+        return {"ok": True, "window_id": window_from_token(request.get("token"))}
+    if action == "window_action":
+        act_x11_window(request.get("window_id"), request.get("operation"))
+        return {"ok": True}
     raise ValueError("Unknown action")
 
 
