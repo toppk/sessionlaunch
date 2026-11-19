@@ -8,7 +8,7 @@ out="$repo_root/_site"
 theme="$site_dir/theme"
 canonical=https://toppk.github.io/sessionlaunch
 edit=https://github.com/toppk/sessionlaunch/edit/master
-version=$(PYTHONPATH="$repo_root" python3 -c 'from session_launch import __version__; print(__version__)')
+version=$(PYTHONPATH="$repo_root/src" python3 -c 'from session_launch import __version__; print(__version__)')
 
 # page|title|navigation section|source, in reading order.
 pages=(

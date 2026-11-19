@@ -14,7 +14,11 @@ dependencies = ["PySide6>=6", "python-xlib>=0.33"]
 [project.scripts]
 sessionlaunch = "session_launch.cli:main"
 
+[tool.setuptools]
+package-dir = {"" = "src"}
+
 [tool.setuptools.packages.find]
+where = ["src"]
 include = ["session_launch*"]
 
 [tool.setuptools.package-data]

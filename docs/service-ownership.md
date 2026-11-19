@@ -52,3 +52,12 @@ The production GUI and CLI use the service. `SESSIONLAUNCH_DISABLE_SERVICE=1`
 remains a development switch for local tests; it is not a second supported
 production owner. An existing GUI process must be restarted after installing
 this version to run the new client code.
+
+Both clients call `session_launch.service_client.request`, which
+adds their version and protocol number to every request. The GUI identifies
+itself with `client="gui"`; CLI requests use `client="cli"`. The CLI's
+`install`, `version`, and `describe` commands do not need session state.
+An explicitly supplied history export can be input to the `sessions` command;
+the service remains the owner of live state and mutations. `revive` asks the
+service for a fresh AgentsView record and uses its launch command after CLI
+confirmation.

@@ -57,13 +57,14 @@ revival and requires confirmation before opening them.
 sessionlaunch describe
 sessionlaunch snapshot
 sessionlaunch sessions list --state dormant --limit 20
-sessionlaunch hotlist --hotlist PATH --search TEXT
+sessionlaunch revive claude UUID --dry-run
+sessionlaunch revive claude UUID
 ```
 
-`sessionlaunch hotlist` only inspects a historical TOML file. To offer one
-stopped conversation for revival in the running GUI, use
-`sessionlaunch request-revive --hotlist PATH --id UUID`. The GUI still asks
-before launching it. No hotlist command edits the TOML file.
+`sessionlaunch revive` checks one UUID against AgentsView through the service,
+shows its directory and command, and asks before opening it. `--dry-run`
+shows the plan without launching anything. The service rejects a session
+that is already running or starting.
 
 ## Stored data
 

@@ -43,16 +43,18 @@ list to scripts. Useful commands include:
 sessionlaunch status
 sessionlaunch snapshot
 sessionlaunch sessions list --state dormant --limit 20
-sessionlaunch hotlist --hotlist PATH --search TEXT
-sessionlaunch request-revive --hotlist PATH --id UUID
+sessionlaunch revive claude UUID --dry-run
+sessionlaunch revive claude UUID
 sessionlaunch --version
 ```
 
-`hotlist` reads an explicitly chosen historical TOML file and asks the service
-for live process status. `request-revive` queues stopped matches through the
-service; the running GUI asks for confirmation before
-starting each agent. Neither command edits the hotlist. The GUI also previews
-the directory and command before an agent revival. A frozen foreground
+`revive` looks up one complete UUID in AgentsView through the service, shows
+the working directory and exact command, then asks for confirmation in the
+terminal. `--dry-run` only previews; `--yes` explicitly skips the prompt.
+The service checks again for a running or starting copy before launch. The
+historical `hotlist.toml` file is preserved as user data but is no longer an
+application input. The GUI also previews the directory and command before an
+agent revival. A frozen foreground
 command can be replayed after confirmation, but a frozen Claude or Codex
 command is preview-only; agent conversations use their session IDs instead.
 
@@ -96,7 +98,7 @@ The [service ownership contract](docs/service-ownership.md) lists the state
 the service owns and the preferences clients may keep locally. Each service
 request carries the client's application and protocol versions;
 the reply carries the service versions. The GUI and service log the pair when
-they connect. Protocol version 1 is informational for now: a mismatch is
+they connect. The protocol version is informational for now: a mismatch is
 visible in logs but does not block a request.
 
 The default launch backend uses transient `systemd --user` units, leaving
@@ -111,7 +113,7 @@ can be chosen in the GUI or set with `default_terminal` in the same file.
 
 ## Development
 
-The version has one source of truth: `session_launch/__init__.py`. The package
+The version has one source of truth: `src/session_launch/__init__.py`. The package
 build reads that value, and `sessionlaunch --version`, `sessionlaunch version`,
 and the GUI's **About SessionLaunch** menu display it. `sessionlaunch status`
 shows the running service's version, which may differ until it is restarted.
@@ -121,18 +123,24 @@ tag the reviewed commit `vMAJOR.MINOR.PATCH`. Use a minor bump for new behavior
 and a patch bump for fixes during the 0.x series. A tag or push is a separate
 release step; changing the version does not publish anything.
 
-To verify a wheel before release, build it into an empty directory and check
+To verify a wheel before release, clear setuptools' generated source and build
+lists first. Otherwise a removed module can remain in the wheel. Then check
 that its filename and `METADATA` both carry the new version:
 
 ```sh
+rm -rf build src/sessionlaunch.egg-info
 python3 -m pip wheel --no-deps --no-build-isolation -w /tmp/sessionlaunch-wheel .
 ```
 
-Run the focused tests with `python3 -m unittest discover -p 'test_*.py'`.
+The installed package lives in `src/session_launch`; tests import it directly
+from `tests`. `sessionlaunch.py` is the checkout GUI launcher. The installed
+`sessionlaunch` command is the interface for the GUI, service, and CLI tools.
+Run the tests from the checkout with
+`PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_*.py'`.
 The disposable X11 restore cycle is opt-in:
 
 ```sh
-SESSIONLAUNCH_INTEGRATION=1 xvfb-run -a python3 -m unittest -v test_restore_cycle
+SESSIONLAUNCH_INTEGRATION=1 PYTHONPATH=src xvfb-run -a python3 -m unittest -v tests.test_restore_cycle
 ```
 
 It uses a harmless Python marker and does not launch an agent. Build the

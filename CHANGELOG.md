@@ -4,6 +4,17 @@ SessionLaunch uses `MAJOR.MINOR.PATCH` version numbers. During the 0.x series,
 minor versions add features or change behavior; patch versions fix defects
 without intentionally changing the session data format.
 
+## 0.4.0 — 2026-11-19
+
+- Move the Python package to `src/session_launch` and tests to `tests`, with
+  direct package imports and clearer module names.
+- Retire the hotlist CLI, GUI control socket, and revival queue. Preserve the
+  historical TOML file as user data.
+- Add `sessionlaunch revive PROVIDER UUID` with a service-backed preview,
+  confirmation, and the existing duplicate-launch checks.
+- Increment the service protocol version to 2 because the hotlist queue actions
+  were removed; version mismatches remain diagnostic rather than blocking.
+
 ## 0.3.2 — 2026-11-19
 
 - Move automatic terminal-to-session organization migration into the service
